@@ -7,8 +7,23 @@ import OpenAI from "openai"
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ""
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ""
-const OPENAI_BASE_URL =
-  import.meta.env.VITE_OPENAI_BASE_URL || "/api/openai-api"
+const ENV_BASE = import.meta.env.VITE_OPENAI_BASE_URL || "/api/openai-api"
+
+// =====================
+// SAFE BASE URL
+// =====================
+
+const getBaseURL = () => {
+  try {
+    if (typeof window !== "undefined") {
+      return window.location.origin + ENV_BASE
+    }
+  } catch (e) {}
+
+  return undefined
+}
+
+const OPENAI_BASE_URL = getBaseURL()
 
 // =====================
 // CLIENTS
@@ -79,9 +94,8 @@ completed
 
 Rules:
 - Keep replies under 40 words
-- Be friendly
 - Stay in funnel
-- Always return JSON
+- Return JSON only
 
 Format:
 {
@@ -100,7 +114,7 @@ Format:
 async function callGemini(
   prompt: string,
   modelName: string,
-  useTemperature: boolean = true
+  useTemperature = true
 ): Promise<string> {
   const generationConfig: any = {
     responseMimeType: "application/json",
@@ -132,7 +146,7 @@ async function callGemini(
 async function callOpenAI(
   prompt: string,
   modelName: string,
-  useTemperature: boolean = true
+  useTemperature = true
 ): Promise<string> {
   const body: any = {
     model: modelName,
@@ -148,9 +162,9 @@ async function callOpenAI(
     body.temperature = 0.1
   }
 
-  const response = await openai.chat.completions.create(body)
+  const res = await openai.chat.completions.create(body)
 
-  return response.choices[0]?.message?.content || "{}"
+  return res.choices[0]?.message?.content || "{}"
 }
 
 // =====================
@@ -177,7 +191,7 @@ export async function generateAIResponse(
       hours: businessData?.hours,
     }
 
-    const historyText = recentMessages
+    const history = recentMessages
       .slice(-4)
       .map(
         (m) =>
@@ -194,39 +208,31 @@ Context:
 ${JSON.stringify(context)}
 
 History:
-${historyText}
+${history}
 
 User:
 ${userMessage}
 `
 
-    let responseText = ""
-
-    const useTemp = modelConfig.useTemperature !== false
+    let text = ""
 
     if (modelConfig.provider === "openai") {
-      responseText = await callOpenAI(
+      text = await callOpenAI(
         prompt,
         modelConfig.modelName,
-        useTemp
+        modelConfig.useTemperature !== false
       )
     } else {
-      responseText = await callGemini(
+      text = await callGemini(
         prompt,
         modelConfig.modelName,
-        useTemp
+        modelConfig.useTemperature !== false
       )
     }
 
-    responseText = responseText.trim()
-
     const parsed = JSON.parse(
-      responseText.replace(/```json|```/g, "")
+      text.replace(/```json|```/g, "")
     ) as AIResponse
-
-    if (!parsed.summary) {
-      parsed.summary = conversationState.summary || ""
-    }
 
     parsed.triggerLeadCapture =
       parsed.nextStage === STAGES.LEAD_CAPTURE_PHONE
@@ -236,7 +242,7 @@ ${userMessage}
     console.error("AI ERROR", err)
 
     return {
-      reply: "Sorry, try again.",
+      reply: "Something went wrong.",
       nextStage: conversationState.stage || STAGES.INTRO,
       triggerLeadCapture: false,
     }
