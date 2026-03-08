@@ -1,66 +1,67 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import OpenAI from 'openai'
+import { GoogleGenerativeAI } from "@google/generative-ai"
+import OpenAI from "openai"
 
-// ============================
+// =====================
 // ENV
-// ============================
+// =====================
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
-const OPENAI_BASE_URL = import.meta.env.VITE_OPENAI_BASE_URL || undefined
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ""
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ""
+const OPENAI_BASE_URL =
+  import.meta.env.VITE_OPENAI_BASE_URL || "/api/openai-api"
 
-// ============================
+// =====================
 // CLIENTS
-// ============================
+// =====================
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
 
 const openai = new OpenAI({
-    apiKey: OPENAI_API_KEY,
-    dangerouslyAllowBrowser: true,
-    baseURL: OPENAI_BASE_URL // FIXED
+  apiKey: OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true,
+  baseURL: OPENAI_BASE_URL,
 })
 
-// ============================
+// =====================
 // TYPES
-// ============================
+// =====================
 
-export type AIProvider = 'google' | 'openai'
+export type AIProvider = "google" | "openai"
 
 export interface ModelConfig {
-    provider: AIProvider
-    modelName: string
-    useTemperature?: boolean
+  provider: AIProvider
+  modelName: string
+  useTemperature?: boolean
 }
 
 export const STAGES = {
-    INTRO: 'intro',
-    GOAL_DISCOVERY: 'goal_discovery',
-    MOTIVATION: 'motivation',
-    TRIAL_OFFER: 'trial_offer',
-    LEAD_CAPTURE_PHONE: 'lead_capture_phone',
-    COMPLETED: 'completed'
+  INTRO: "intro",
+  GOAL_DISCOVERY: "goal_discovery",
+  MOTIVATION: "motivation",
+  TRIAL_OFFER: "trial_offer",
+  LEAD_CAPTURE_PHONE: "lead_capture_phone",
+  COMPLETED: "completed",
 } as const
 
 export type Stage = typeof STAGES[keyof typeof STAGES]
 
 export interface AIResponse {
-    reply: string
-    nextStage: Stage
-    triggerLeadCapture: boolean
-    suggestions?: string[]
-    summary?: string
+  reply: string
+  nextStage: Stage
+  triggerLeadCapture: boolean
+  suggestions?: string[]
+  summary?: string
 }
 
 export interface ConversationState {
-    stage: Stage
-    leadData: Record<string, string>
-    summary?: string
+  stage: Stage
+  leadData: Record<string, string>
+  summary?: string
 }
 
-// ============================
+// =====================
 // SYSTEM PROMPT
-// ============================
+// =====================
 
 const SYSTEM_INSTRUCTION = `
 You are a friendly gym assistant.
@@ -77,12 +78,12 @@ lead_capture_phone
 completed
 
 Rules:
-- Keep reply under 40 words
+- Keep replies under 40 words
 - Be friendly
 - Stay in funnel
-- Return JSON only
+- Always return JSON
 
-Output JSON:
+Format:
 {
  reply,
  nextStage,
@@ -92,105 +93,102 @@ Output JSON:
 }
 `
 
-// ============================
+// =====================
 // GEMINI
-// ============================
+// =====================
 
 async function callGemini(
-    prompt: string,
-    modelName: string,
-    useTemperature: boolean = true
+  prompt: string,
+  modelName: string,
+  useTemperature: boolean = true
 ): Promise<string> {
+  const generationConfig: any = {
+    responseMimeType: "application/json",
+  }
 
-    const generationConfig: any = {
-        responseMimeType: 'application/json'
-    }
+  if (useTemperature) {
+    generationConfig.temperature = 0.1
+  }
 
-    if (useTemperature) {
-        generationConfig.temperature = 0.1
-    }
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig,
+  })
 
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig
-    })
+  const result = await model.generateContent({
+    contents: [
+      { role: "user", parts: [{ text: SYSTEM_INSTRUCTION }] },
+      { role: "user", parts: [{ text: prompt }] },
+    ],
+  })
 
-    const result = await model.generateContent({
-        contents: [
-            { role: 'user', parts: [{ text: SYSTEM_INSTRUCTION }] },
-            { role: 'user', parts: [{ text: prompt }] }
-        ]
-    })
-
-    return result.response.text()
+  return result.response.text()
 }
 
-// ============================
+// =====================
 // OPENAI
-// ============================
+// =====================
 
 async function callOpenAI(
-    prompt: string,
-    modelName: string,
-    useTemperature: boolean = true
+  prompt: string,
+  modelName: string,
+  useTemperature: boolean = true
 ): Promise<string> {
+  const body: any = {
+    model: modelName,
+    messages: [
+      { role: "system", content: SYSTEM_INSTRUCTION },
+      { role: "user", content: prompt },
+    ],
+    response_format: { type: "json_object" },
+    max_tokens: 120,
+  }
 
-    const body: any = {
-        model: modelName,
-        messages: [
-            { role: 'system', content: SYSTEM_INSTRUCTION },
-            { role: 'user', content: prompt }
-        ],
-        response_format: { type: 'json_object' },
-        max_tokens: 120
-    }
+  if (useTemperature) {
+    body.temperature = 0.1
+  }
 
-    if (useTemperature) {
-        body.temperature = 0.1
-    }
+  const response = await openai.chat.completions.create(body)
 
-    const response = await openai.chat.completions.create(body)
-
-    return response.choices[0]?.message?.content || '{}'
+  return response.choices[0]?.message?.content || "{}"
 }
 
-// ============================
+// =====================
 // MAIN
-// ============================
+// =====================
 
 export async function generateAIResponse(
-    userMessage: string,
-    conversationState: ConversationState,
-    businessData: any,
-    recentMessages: any[],
-    modelConfig: ModelConfig = {
-        provider: 'google',
-        modelName: 'gemini-1.5-flash'
-    }
+  userMessage: string,
+  conversationState: ConversationState,
+  businessData: any,
+  recentMessages: any[],
+  modelConfig: ModelConfig = {
+    provider: "google",
+    modelName: "gemini-2.5-flash",
+  }
 ): Promise<AIResponse> {
+  try {
+    const stage = conversationState.stage || STAGES.INTRO
 
-    try {
+    const context = {
+      services: businessData?.services,
+      pricing: businessData?.pricing_note,
+      offer: businessData?.offer,
+      hours: businessData?.hours,
+    }
 
-        const stage = conversationState.stage || STAGES.INTRO
+    const historyText = recentMessages
+      .slice(-4)
+      .map(
+        (m) =>
+          `${m.sender === "user" ? "User" : "Assistant"}: ${m.text}`
+      )
+      .join("\n")
 
-        const context = {
-            services: businessData?.services,
-            pricing: businessData?.pricing_note,
-            offer: businessData?.offer,
-            hours: businessData?.hours
-        }
-
-        const historyText = recentMessages
-            .slice(-4)
-            .map(m =>
-                `${m.sender === 'user' ? 'User' : 'Assistant'}: ${m.text}`
-            )
-            .join('\n')
-
-        const prompt = `
+    const prompt = `
 Stage: ${stage}
 
-Summary: ${conversationState.summary || 'none'}
+Summary: ${conversationState.summary || "none"}
 
 Context:
 ${JSON.stringify(context)}
@@ -202,51 +200,45 @@ User:
 ${userMessage}
 `
 
-        let responseText = ''
+    let responseText = ""
 
-        const useTemp = modelConfig.useTemperature !== false
+    const useTemp = modelConfig.useTemperature !== false
 
-        if (modelConfig.provider === 'openai') {
-
-            responseText = await callOpenAI(
-                prompt,
-                modelConfig.modelName,
-                useTemp
-            )
-
-        } else {
-
-            responseText = await callGemini(
-                prompt,
-                modelConfig.modelName,
-                useTemp
-            )
-
-        }
-
-        responseText = responseText.trim()
-
-        const parsed = JSON.parse(
-            responseText.replace(/```json|```/g, '')
-        ) as AIResponse
-
-        if (!parsed.summary) {
-            parsed.summary = conversationState.summary || ''
-        }
-
-        parsed.triggerLeadCapture =
-            parsed.nextStage === STAGES.LEAD_CAPTURE_PHONE
-
-        return parsed
-
-    } catch (err) {
-
-        console.error('AI ERROR', err)
-
-        return {
-            reply: "Sorry, try again.",
-            nextStage: conversationState.stage || STAGES.INTRO,
-            triggerLeadCapture: false
-        }
+    if (modelConfig.provider === "openai") {
+      responseText = await callOpenAI(
+        prompt,
+        modelConfig.modelName,
+        useTemp
+      )
+    } else {
+      responseText = await callGemini(
+        prompt,
+        modelConfig.modelName,
+        useTemp
+      )
     }
+
+    responseText = responseText.trim()
+
+    const parsed = JSON.parse(
+      responseText.replace(/```json|```/g, "")
+    ) as AIResponse
+
+    if (!parsed.summary) {
+      parsed.summary = conversationState.summary || ""
+    }
+
+    parsed.triggerLeadCapture =
+      parsed.nextStage === STAGES.LEAD_CAPTURE_PHONE
+
+    return parsed
+  } catch (err) {
+    console.error("AI ERROR", err)
+
+    return {
+      reply: "Sorry, try again.",
+      nextStage: conversationState.stage || STAGES.INTRO,
+      triggerLeadCapture: false,
+    }
+  }
 }
