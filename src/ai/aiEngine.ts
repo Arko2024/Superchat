@@ -6,10 +6,24 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+
+// Helper to safely get the base URL for OpenAI (Vercel proxy)
+const getOpenAIBaseURL = () => {
+    if (typeof window === 'undefined') return undefined
+    try {
+        const origin = window.location.origin
+        if (!origin || origin === 'null') return undefined
+        // Ensure it's a valid absolute URL
+        return new URL('/openai-api/v1', origin).toString()
+    } catch (e) {
+        return undefined
+    }
+}
+
 const openai = new OpenAI({
     apiKey: OPENAI_API_KEY,
     dangerouslyAllowBrowser: true,
-    baseURL: typeof window !== 'undefined' ? `${window.location.origin}/openai-api/v1` : undefined
+    baseURL: getOpenAIBaseURL()
 })
 
 export type AIProvider = 'google' | 'openai'
